@@ -113,8 +113,10 @@ describe("Axios response-header overflow diagnostics", () => {
       message: expect.stringContaining("Response headers exceed"),
       code: "ERR_NETWORK",
       config: { adapter: "fetch" },
-      cause: { cause: { code: "UND_ERR_HEADERS_OVERFLOW" } },
     });
+    let cause: unknown = (error as AxiosError).cause;
+    while (cause instanceof Error && cause.cause) cause = cause.cause;
+    expect(cause).toMatchObject({ code: "UND_ERR_HEADERS_OVERFLOW" });
     expect(requests).toBe(1);
     expect(createPayload).not.toHaveBeenCalled();
   });
