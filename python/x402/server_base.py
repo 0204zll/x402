@@ -38,6 +38,7 @@ from .pending_settlement_store import ERR_SETTLEMENT_PENDING
 from .schemas import (
     X402_VERSION,
     AbortResult,
+    AfterSettleAbortError,
     FacilitatorCapabilityError,
     Network,
     PaymentCancellationDispatcher,
@@ -430,6 +431,15 @@ SyncOnVerifiedPaymentCanceledHook = Callable[[VerifiedPaymentCanceledContext], N
 # Hook command type for generator-based implementation
 HookPhase = Literal["before", "after", "failure", "call_facilitator", "dispatch_cancel"]
 HookCommand = tuple[HookPhase, Any, Any]  # (phase, hook|client|options, context)
+
+
+def _apply_after_settle_abort(result: SettleResponse, abort: AfterSettleAbortError) -> None:
+    """Flip an onchain successful settle to success=False, keeping its receipt fields."""
+    result.success = False
+    result.error_reason = abort.reason
+    result.error_message = abort.message
+    result.after_settle_aborted = True
+
 
 # Type alias for facilitator clients (either async or sync)
 _AnyFacilitatorClient = FacilitatorClient | FacilitatorClientSync
@@ -1600,7 +1610,10 @@ class x402ResourceServerBase:
                     extension_keys,
                     matched_scheme,
                 ):
-                    yield ("after", after_hook, result_context)
+                    after_result = yield ("after", after_hook, result_context)
+                    if isinstance(after_result, AfterSettleAbortError):
+                        _apply_after_settle_abort(result.result, after_result)
+                        break
                 return result.result
 
         try:
@@ -1671,7 +1684,10 @@ class x402ResourceServerBase:
                             extension_keys,
                             matched_scheme,
                         ):
-                            yield ("after", after_hook, result_context)
+                            after_result = yield ("after", after_hook, result_context)
+                            if isinstance(after_result, AfterSettleAbortError):
+                                _apply_after_settle_abort(result.result, after_result)
+                                break
                         return result.result
 
                 return settle_result
@@ -1693,7 +1709,10 @@ class x402ResourceServerBase:
                 extension_keys,
                 matched_scheme,
             ):
-                yield ("after", hook, result_context)
+                after_result = yield ("after", hook, result_context)
+                if isinstance(after_result, AfterSettleAbortError):
+                    _apply_after_settle_abort(settle_result, after_result)
+                    return settle_result
 
             return settle_result
 
